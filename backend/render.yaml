@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: cinecritica-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: cinecritica-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OMDB_API_KEY
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+
+databases:
+  - name: cinecritica-db
+    plan: free
+    databaseName: cinecritica
+    user: cinecritica_user
+

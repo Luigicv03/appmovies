@@ -1,0 +1,69 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Operating System
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.AppleDouble
+.LSOverride
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.iml
+
+# Build outputs
+dist/
+build/
+*.apk
+*.aab
+*.ipa
+
+# Testing
+coverage/
+.nyc_output/
+
+# Expo
+.expo/
+.expo-shared/
+web-build/
+
+# Prisma
+prisma/migrations/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache
+.cache/
+.parcel-cache/
+
+# Misc
+*.pem
+*.key
+*.cert
+*.mobileprovision
+

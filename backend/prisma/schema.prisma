@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model
+model User {
+  id            String   @id @default(uuid())
+  username      String   @unique @db.VarChar(50)
+  email         String   @unique @db.VarChar(100)
+  password_hash String   @db.VarChar(255)
+  role          UserRole @default(USER)
+  avatar_url    String?  @db.VarChar(255)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  // Relations
+  reviews Review[]
+
+  @@index([email])
+  @@index([username])
+}
+
+// User roles enum
+enum UserRole {
+  USER
+  CRITIC
+}
+
+// Movie model
+model Movie {
+  id              String   @id @default(uuid())
+  external_api_id Int      @unique
+  title           String   @db.VarChar(255)
+  synopsis        String?  @db.Text
+  release_date    DateTime?
+  poster_url      String?  @db.VarChar(255)
+  genres          Json?    // Array of genre strings
+  actors          Json?    // Array of actor strings
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  // Relations
+  reviews Review[]
+
+  @@index([external_api_id])
+  @@index([title])
+}
+
+// Review model
+model Review {
+  id           String   @id @default(uuid())
+  user_id      String
+  movie_id     String
+  score        Int      // 1-10
+  comment_text String?  @db.Text
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  // Relations
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  movie Movie @relation(fields: [movie_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, movie_id]) // Un usuario solo puede dejar una reseña por película
+  @@index([user_id])
+  @@index([movie_id])
+  @@index([created_at])
+}
+

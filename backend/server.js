@@ -16,6 +16,21 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API de CineUru está funcionando correctamente',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      auth: '/api/v1/auth',
+      users: '/api/v1/users',
+      movies: '/api/v1/movies',
+      reviews: '/api/v1/reviews'
+    }
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running' });
 });

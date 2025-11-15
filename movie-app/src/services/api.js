@@ -36,23 +36,41 @@ api.interceptors.response.use(
 
 export const authService = {
   register: async (email, username, password) => {
+    const trimmedEmail = email?.trim();
+    const trimmedUsername = username?.trim();
+    const trimmedPassword = password?.trim();
+    
+    if (!trimmedEmail || !trimmedUsername || !trimmedPassword) {
+      throw new Error('Todos los campos son requeridos');
+    }
+
     const response = await api.post('/auth/register', {
-      email,
-      username,
-      password,
+      email: trimmedEmail,
+      username: trimmedUsername,
+      password: trimmedPassword,
     });
+    
     return response.data;
   },
 
   login: async (email, password) => {
+    const trimmedEmail = email?.trim();
+    const trimmedPassword = password?.trim();
+    
+    if (!trimmedEmail || !trimmedPassword) {
+      throw new Error('Email y contraseña son requeridos');
+    }
+
     const response = await api.post('/auth/login', {
-      email,
-      password,
+      email: trimmedEmail,
+      password: trimmedPassword,
     });
-    if (response.data.token) {
+    
+    if (response.data.token && response.data.user) {
       await AsyncStorage.setItem('authToken', response.data.token);
       await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
     }
+    
     return response.data;
   },
 
@@ -141,7 +159,6 @@ export const favoritesService = {
       const favoritesStr = await AsyncStorage.getItem(getFavoritesKey(userId));
       return favoritesStr ? JSON.parse(favoritesStr) : [];
     } catch (error) {
-      console.error('Error obteniendo favoritos:', error);
       return [];
     }
   },
@@ -164,7 +181,6 @@ export const favoritesService = {
 
       return favorites;
     } catch (error) {
-      console.error('Error agregando a favoritos:', error);
       throw error;
     }
   },
@@ -182,7 +198,6 @@ export const favoritesService = {
       await AsyncStorage.setItem(getFavoritesKey(userId), JSON.stringify(filtered));
       return filtered;
     } catch (error) {
-      console.error('Error removiendo de favoritos:', error);
       throw error;
     }
   },
@@ -198,7 +213,6 @@ export const favoritesService = {
         return false;
       });
     } catch (error) {
-      console.error('Error verificando favorito:', error);
       return false;
     }
   },

@@ -53,7 +53,6 @@ const MovieListScreen = ({ route, navigation }) => {
 
       setMovies(data);
     } catch (error) {
-      console.error('Error cargando lista de películas:', error);
       setMovies([]);
     } finally {
       setLoading(false);

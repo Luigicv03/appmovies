@@ -27,6 +27,8 @@ export default function MovieDetailScreen({ route, navigation }) {
   const [movieDetails, setMovieDetails] = useState(movie);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [activeTab, setActiveTab] = useState('sinopsis');
   const [reviewText, setReviewText] = useState('');
   const [reviewScore, setReviewScore] = useState(0);
@@ -35,15 +37,21 @@ export default function MovieDetailScreen({ route, navigation }) {
 
   useEffect(() => {
     if (movie) {
-      if (!movie.id && (movie.external_api_id || movie.title)) {
-        loadMovieByIdOrExternalId();
-      } else if (movie.id) {
-        loadMovieDetails();
-        loadReviews();
-      }
+      const loadData = async () => {
+        if (!movie.id && (movie.external_api_id || movie.title)) {
+          loadMovieByIdOrExternalId();
+        } else if (movie.id) {
+          loadMovieDetails(false).then(() => {
+            loadReviews();
+          }).catch(() => {
+            loadReviews();
+          });
+        }
+      };
+      loadData();
+      checkIfFavorite();
     }
-    checkIfFavorite();
-  }, [movie?.id, movie?.external_api_id, movieDetails?.id, user?.id]);
+  }, [movie?.id, movie?.external_api_id, user?.id]);
 
   const checkIfFavorite = async () => {
     if (!isAuthenticated || !user?.id) {
@@ -57,7 +65,6 @@ export default function MovieDetailScreen({ route, navigation }) {
       const favorite = await favoritesService.isFavorite(user.id, movieIdToUse);
       setIsFavorite(favorite);
     } catch (error) {
-      console.error('Error verificando favorito:', error);
       setIsFavorite(false);
     }
   };
@@ -81,7 +88,7 @@ export default function MovieDetailScreen({ route, navigation }) {
             return;
           }
         } catch (error) {
-          console.error('Error buscando película por external_api_id:', error);
+          // Silently handle error
         }
       }
       
@@ -89,33 +96,45 @@ export default function MovieDetailScreen({ route, navigation }) {
         loadMovieDetails();
         loadReviews();
       } else {
-        console.error('No se pudo encontrar un id válido para la película');
         Alert.alert('Error', 'No se pudo cargar la película. Por favor, intenta de nuevo.');
       }
     } catch (error) {
-      console.error('Error cargando película:', error);
       Alert.alert('Error', 'No se pudo cargar la película');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadMovieDetails = async () => {
+  const loadMovieDetails = async (showLoading = false) => {
     if (!movie || !movie.id) return;
     try {
-      setLoading(true);
+      const needsDetails = !movieDetails?.critic_rating && !movieDetails?.audience_rating && 
+                           !movie?.critic_rating && !movie?.audience_rating;
+      
+      if (needsDetails) {
+        setLoadingDetails(true);
+      } else if (showLoading && (!movieDetails || Object.keys(movieDetails).length <= 3)) {
+        setLoading(true);
+      }
+      
       const response = await moviesService.getMovieById(movie.id);
       if (response.data) {
-        setMovieDetails(response.data);
-        if (!response.data.id && movie.id) {
-          setMovieDetails({ ...response.data, id: movie.id });
-        }
+        setMovieDetails(prev => ({
+          ...response.data,
+          id: response.data.id || movie.id || prev?.id,
+          critic_rating: response.data.critic_rating ?? prev?.critic_rating,
+          audience_rating: response.data.audience_rating ?? prev?.audience_rating,
+          critic_reviews_count: response.data.critic_reviews_count ?? prev?.critic_reviews_count,
+          audience_reviews_count: response.data.audience_reviews_count ?? prev?.audience_reviews_count,
+        }));
         await checkIfFavorite();
       }
     } catch (error) {
-      console.error('Error cargando detalles de película:', error);
     } finally {
-      setLoading(false);
+      setLoadingDetails(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
@@ -124,10 +143,12 @@ export default function MovieDetailScreen({ route, navigation }) {
     if (!movieIdToUse) return;
     
     try {
+      setLoadingReviews(true);
       const response = await reviewsService.getMovieReviews(movieIdToUse);
       setReviews(response.data || []);
     } catch (error) {
-      console.error('Error cargando reseñas:', error);
+    } finally {
+      setLoadingReviews(false);
     }
   };
 
@@ -154,7 +175,7 @@ export default function MovieDetailScreen({ route, navigation }) {
       return;
     }
 
-    const movieIdToUse = movieDetails?.id || movie?.id;
+    const movieIdToUse = (movieDetails || movie)?.id;
     
     if (!movieIdToUse) {
       Alert.alert('Error', 'Película no válida. Por favor, recarga la página.');
@@ -179,9 +200,11 @@ export default function MovieDetailScreen({ route, navigation }) {
         }
       }
       resetReviewForm();
-      loadReviews();
+      await Promise.all([
+        loadReviews(),
+        loadMovieDetails(false)
+      ]);
     } catch (error) {
-      console.error('Error guardando reseña:', error);
       const errorMessage = error.response?.data?.message || 'No se pudo guardar la reseña';
       Alert.alert('Error', errorMessage);
     }
@@ -196,9 +219,14 @@ export default function MovieDetailScreen({ route, navigation }) {
         onPress: async () => {
           try {
             await reviewsService.deleteReview(reviewId);
-            loadReviews();
+            // Recargar reseñas y detalles de película para actualizar ratings (sin mostrar loading)
+            await Promise.all([
+              loadReviews(),
+              loadMovieDetails(false)
+            ]);
+            Alert.alert('Éxito', 'Reseña eliminada correctamente');
           } catch (error) {
-            console.error('Error eliminando reseña:', error);
+            Alert.alert('Error', 'No se pudo eliminar la reseña');
           }
         },
       },
@@ -226,12 +254,14 @@ export default function MovieDetailScreen({ route, navigation }) {
         Alert.alert('Éxito', 'Película agregada a tu lista');
       }
     } catch (error) {
-      console.error('Error cambiando favorito:', error);
       Alert.alert('Error', 'No se pudo actualizar tu lista');
     }
   };
 
-  if (loading) {
+  // Solo mostrar loading si no hay datos básicos disponibles
+  const hasBasicData = movieDetails && (movieDetails.title || movie?.title);
+  
+  if (!hasBasicData && loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -239,7 +269,7 @@ export default function MovieDetailScreen({ route, navigation }) {
     );
   }
 
-  if (!movieDetails) {
+  if (!movieDetails && !movie) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={{ color: Colors.text.primary }}>Cargando...</Text>
@@ -247,25 +277,47 @@ export default function MovieDetailScreen({ route, navigation }) {
     );
   }
 
+  // Usar movieDetails o fallback a movie
+  const displayMovie = movieDetails || movie;
+  
+  // Determinar si los ratings están cargando
+  const ratingsLoading = loadingDetails && 
+                         !displayMovie.critic_rating && 
+                         !displayMovie.audience_rating &&
+                         (!movie?.critic_rating && !movie?.audience_rating);
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={styles.container}
     >
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {loading && hasBasicData && (
+          <View style={styles.loadingBar}>
+            <ActivityIndicator size="small" color={Colors.primary} />
+          </View>
+        )}
+        
         <View style={styles.heroContainer}>
-          <Image source={{ uri: movieDetails.poster_url }} style={styles.heroImage} />
+          <Image 
+            source={{ uri: displayMovie.poster_url || movie?.poster_url }} 
+            style={styles.heroImage} 
+          />
           <LinearGradient
             colors={['rgba(18,18,18,0)', 'rgba(18,18,18,0.6)', 'rgba(18,18,18,1)']}
             style={styles.heroGradient}
           />
           <View style={styles.heroContent}>
-            <Text style={styles.heroTitle}>{movieDetails.title}</Text>
+            <Text style={styles.heroTitle}>{displayMovie.title || movie?.title}</Text>
           </View>
         </View>
 
         <Text style={styles.movieInfo}>
-          {new Date(movieDetails.release_date).getFullYear()} • 2h 30m • R
+          {displayMovie.release_date 
+            ? new Date(displayMovie.release_date).getFullYear() 
+            : movie?.release_date 
+            ? new Date(movie.release_date).getFullYear() 
+            : ''} • 2h 30m • R
         </Text>
 
         <View style={styles.addButtonContainer}>
@@ -287,20 +339,30 @@ export default function MovieDetailScreen({ route, navigation }) {
         <View style={styles.ratingsGrid}>
           <View style={styles.ratingCard}>
             <Ionicons name="star" size={32} color={Colors.primary} />
-            <Text style={styles.ratingPercent}>
-              {movieDetails.critic_rating || 0}%
-            </Text>
+            {ratingsLoading ? (
+              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 8 }} />
+            ) : (
+              <Text style={styles.ratingPercent}>
+                {displayMovie.critic_rating ?? movie?.critic_rating ?? 'N/A'}
+                {displayMovie.critic_rating !== undefined || movie?.critic_rating !== undefined ? '%' : ''}
+              </Text>
+            )}
             <Text style={styles.ratingSubtext}>
-              Basado en {movieDetails.critic_reviews_count || 0} reseñas de Críticos
+              Basado en {displayMovie.critic_reviews_count ?? movie?.critic_reviews_count ?? 0} reseñas de Críticos
             </Text>
           </View>
           <View style={styles.ratingCard}>
             <Ionicons name="film" size={32} color={Colors.primary} />
-            <Text style={styles.ratingPercent}>
-              {movieDetails.audience_rating || 0}%
-            </Text>
+            {ratingsLoading ? (
+              <ActivityIndicator size="small" color={Colors.primary} style={{ marginVertical: 8 }} />
+            ) : (
+              <Text style={styles.ratingPercent}>
+                {displayMovie.audience_rating ?? movie?.audience_rating ?? 'N/A'}
+                {displayMovie.audience_rating !== undefined || movie?.audience_rating !== undefined ? '%' : ''}
+              </Text>
+            )}
             <Text style={styles.ratingSubtext}>
-              Basado en {movieDetails.audience_reviews_count || 0} calificaciones
+              Basado en {displayMovie.audience_reviews_count ?? movie?.audience_reviews_count ?? 0} calificaciones
             </Text>
           </View>
         </View>
@@ -352,14 +414,16 @@ export default function MovieDetailScreen({ route, navigation }) {
 
         {activeTab === 'sinopsis' && (
           <View style={styles.tabContent}>
-            <Text style={styles.tabContentText}>{movieDetails.synopsis || 'Sin sinopsis disponible'}</Text>
+            <Text style={styles.tabContentText}>
+              {displayMovie.synopsis || movie?.synopsis || 'Sin sinopsis disponible'}
+            </Text>
           </View>
         )}
 
         {activeTab === 'elenco' && (
           <View style={styles.tabContent}>
             <Text style={styles.tabContentText}>
-              {movieDetails.actors?.join(', ') || 'Sin información de elenco'}
+              {displayMovie.actors?.join(', ') || movie?.actors?.join(', ') || 'Sin información de elenco'}
             </Text>
           </View>
         )}
@@ -367,9 +431,14 @@ export default function MovieDetailScreen({ route, navigation }) {
         {activeTab === 'info' && (
           <View style={styles.tabContent}>
             <Text style={styles.tabContentText}>
-              Géneros: {movieDetails.genres?.join(', ') || 'N/A'}
+              Géneros: {displayMovie.genres?.join(', ') || movie?.genres?.join(', ') || 'N/A'}
               {'\n\n'}
-              Fecha de estreno: {new Date(movieDetails.release_date).toLocaleDateString() || 'N/A'}
+              Fecha de estreno: {
+                displayMovie.release_date 
+                  ? new Date(displayMovie.release_date).toLocaleDateString() 
+                  : movie?.release_date
+                  ? new Date(movie.release_date).toLocaleDateString()
+                  : 'N/A'}
             </Text>
           </View>
         )}
@@ -377,10 +446,14 @@ export default function MovieDetailScreen({ route, navigation }) {
         <View style={styles.reviewsSection}>
           <View style={styles.reviewsHeader}>
             <Text style={styles.reviewsTitle}>Reseñas de la Comunidad</Text>
-            <TouchableOpacity>
-              <Text style={styles.reviewsSortText}>Más Recientes</Text>
-              <Ionicons name="chevron-down" size={20} color={Colors.text.tertiary} />
-            </TouchableOpacity>
+            {loadingReviews ? (
+              <ActivityIndicator size="small" color={Colors.primary} />
+            ) : (
+              <TouchableOpacity>
+                <Text style={styles.reviewsSortText}>Más Recientes</Text>
+                <Ionicons name="chevron-down" size={20} color={Colors.text.tertiary} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {isAuthenticated && (
@@ -486,6 +559,12 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: Colors.background.dark,
+  },
+  loadingBar: {
+    paddingVertical: 8,
+    alignItems: 'center',
+    backgroundColor: Colors.background.dark,
   },
   scrollView: {
     flex: 1,

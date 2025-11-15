@@ -45,37 +45,46 @@ export default function ProfileScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       if (isAuthenticated) {
-        loadMyReviews();
-        loadMyFavorites();
+        loadMyFavorites(true);
+        loadMyReviews(true);
+      } else {
+        setMyReviews([]);
+        setMyFavorites([]);
       }
-    }, [isAuthenticated])
+    }, [isAuthenticated, user?.id])
   );
 
-  const loadMyReviews = async () => {
+  const loadMyReviews = async (force = false) => {
+    if (!force && myReviews.length > 0) return;
+    
     try {
       setLoading(true);
       const response = await usersService.getMyReviews();
       setMyReviews(response.data || []);
     } catch (error) {
-      console.error('Error cargando mis reseñas:', error);
-      setMyReviews([]);
+      if (myReviews.length === 0) {
+        setMyReviews([]);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const loadMyFavorites = async () => {
+  const loadMyFavorites = async (force = false) => {
     if (!isAuthenticated || !user?.id) {
       setMyFavorites([]);
       return;
     }
+    if (!force && myFavorites.length > 0) return;
+    
     try {
       setLoadingFavorites(true);
       const favorites = await favoritesService.getFavorites(user.id);
       setMyFavorites(favorites || []);
     } catch (error) {
-      console.error('Error cargando mis favoritos:', error);
-      setMyFavorites([]);
+      if (myFavorites.length === 0) {
+        setMyFavorites([]);
+      }
     } finally {
       setLoadingFavorites(false);
     }
@@ -96,7 +105,7 @@ export default function ProfileScreen({ navigation }) {
         </View>
       </View>
 
-      <View style={styles.actions}>
+      <View style={styles.profileActions}>
         <TouchableOpacity style={styles.editButton} onPress={openEditModal}>
           <Text style={styles.editButtonText}>Editar Perfil</Text>
         </TouchableOpacity>
@@ -147,13 +156,34 @@ export default function ProfileScreen({ navigation }) {
     setAuthLoading(true);
 
     try {
+      const trimmedEmail = email.trim();
+      const trimmedPassword = password.trim();
+      const trimmedUsername = username.trim();
+
+      if (!trimmedEmail) {
+        setError('El email es requerido');
+        setAuthLoading(false);
+        return;
+      }
+
+      if (!trimmedPassword) {
+        setError('La contraseña es requerida');
+        setAuthLoading(false);
+        return;
+      }
+
       if (isLogin) {
-        const result = await login(email, password);
+        const result = await login(trimmedEmail, trimmedPassword);
         if (!result.success) {
-          setError(result.error || 'Error al iniciar sesión');
+          setError(result.error || 'Credenciales inválidas');
         }
       } else {
-        const result = await register(email, username, password);
+        if (!trimmedUsername) {
+          setError('El nombre de usuario es requerido');
+          setAuthLoading(false);
+          return;
+        }
+        const result = await register(trimmedEmail, trimmedUsername, trimmedPassword);
         if (!result.success) {
           setError(result.error || 'Error al registrarse');
         }
@@ -248,6 +278,8 @@ export default function ProfileScreen({ navigation }) {
         setNewPassword('');
         setConfirmPassword('');
       }
+      
+      loadMyReviews(true);
     } catch (err) {
       setUpdateError(
         err.response?.data?.message || 'Ocurrió un error al actualizar el perfil.'
@@ -679,7 +711,15 @@ const styles = StyleSheet.create({
     height: 96,
     borderRadius: 48,
   },
-  profileDetails: {  },
+  profileDetails: {
+    marginLeft: 16,
+  },
+  profileActions: {
+    flexDirection: 'row',
+    marginTop: 16,
+    gap: 12,
+    width: '100%',
+  },
   username: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -688,6 +728,7 @@ const styles = StyleSheet.create({
   role: {
     fontSize: 16,
     color: Colors.text.tertiary,
+    marginTop: 4,
   },
   editButton: {
     backgroundColor: '#2A2A2A',

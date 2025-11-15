@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -24,70 +25,102 @@ export default function HomeScreen({ navigation }) {
   const [topAudience, setTopAudience] = useState([]);
   const [newReleases, setNewReleases] = useState([]);
   const [loading, setLoading] = useState(true);
+  const lastRefreshRef = useRef(0);
 
   useEffect(() => {
     loadMovies();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      const hasData = trending.length > 0 || topCritics.length > 0 || topAudience.length > 0 || newReleases.length > 0;
+      const now = Date.now();
+      if (hasData && (now - lastRefreshRef.current > 1000)) {
+        lastRefreshRef.current = now;
+        const refreshMovies = async () => {
+          try {
+            const [trendingResponse, criticsResponse, audienceResponse, newReleasesResponse] = await Promise.all([
+              moviesService.getTrending().catch(() => null),
+              moviesService.getMovies({ sort: 'critic_rating', limit: 20 }).catch(() => null),
+              moviesService.getMovies({ sort: 'audience_rating', limit: 20 }).catch(() => null),
+              moviesService.getMovies({ sort: 'date', limit: 20 }).catch(() => null)
+            ]);
+
+            if (trendingResponse) {
+              const trendingMovies = Array.isArray(trendingResponse) 
+                ? trendingResponse 
+                : (trendingResponse?.data || trendingResponse?.movies || []);
+              setTrending(trendingMovies);
+            }
+
+            if (criticsResponse) {
+              const criticsMovies = Array.isArray(criticsResponse) 
+                ? criticsResponse 
+                : (criticsResponse?.data || criticsResponse?.movies || []);
+              setTopCritics(criticsMovies);
+            }
+
+            if (audienceResponse) {
+              const audienceMovies = Array.isArray(audienceResponse) 
+                ? audienceResponse 
+                : (audienceResponse?.data || audienceResponse?.movies || []);
+              setTopAudience(audienceMovies);
+            }
+
+            if (newReleasesResponse) {
+              const newReleasesMovies = Array.isArray(newReleasesResponse) 
+                ? newReleasesResponse 
+                : (newReleasesResponse?.data || newReleasesResponse?.movies || []);
+              setNewReleases(newReleasesMovies);
+            }
+          } catch (error) {
+            // Silently handle background refresh errors
+          }
+        };
+
+        refreshMovies();
+      }
+    }, [trending.length, topCritics.length, topAudience.length, newReleases.length])
+  );
+
   const loadMovies = async () => {
     try {
       setLoading(true);
       
-      const trendingResponse = await moviesService.getTrending();
-      console.log('Trending response:', trendingResponse);
+      const [trendingResponse, criticsResponse, audienceResponse, newReleasesResponse] = await Promise.all([
+        moviesService.getTrending(),
+        moviesService.getMovies({ sort: 'critic_rating', limit: 20 }),
+        moviesService.getMovies({ sort: 'audience_rating', limit: 20 }),
+        moviesService.getMovies({ sort: 'date', limit: 20 })
+      ]);
+
       const trendingMovies = Array.isArray(trendingResponse) 
         ? trendingResponse 
         : (trendingResponse?.data || trendingResponse?.movies || []);
       setTrending(trendingMovies);
 
-      const criticsResponse = await moviesService.getMovies({ 
-        sort: 'critic_rating', 
-        limit: 20 
-      });
-      console.log('Critics response:', criticsResponse);
       const criticsMovies = Array.isArray(criticsResponse) 
         ? criticsResponse 
         : (criticsResponse?.data || criticsResponse?.movies || []);
       setTopCritics(criticsMovies);
 
-      const audienceResponse = await moviesService.getMovies({ 
-        sort: 'audience_rating', 
-        limit: 20 
-      });
-      console.log('Audience response:', audienceResponse);
       const audienceMovies = Array.isArray(audienceResponse) 
         ? audienceResponse 
         : (audienceResponse?.data || audienceResponse?.movies || []);
       setTopAudience(audienceMovies);
 
-      const newReleasesResponse = await moviesService.getMovies({ 
-        sort: 'date', 
-        limit: 20 
-      });
-      console.log('New releases response:', newReleasesResponse);
       const newReleasesMovies = Array.isArray(newReleasesResponse) 
         ? newReleasesResponse 
         : (newReleasesResponse?.data || newReleasesResponse?.movies || []);
       setNewReleases(newReleasesMovies);
     } catch (error) {
-      console.error('Error cargando películas:', error);
-      console.error('Error details:', error.response?.data || error.message);
-      setTrending([]);
-      setTopCritics([]);
-      setTopAudience([]);
-      setNewReleases([]);
+      // Keep existing data on error
     } finally {
       setLoading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={Colors.primary} />
-      </View>
-    );
-  }
+  const hasAnyData = trending.length > 0 || topCritics.length > 0 || topAudience.length > 0 || newReleases.length > 0;
 
   return (
     <View style={styles.container}>
@@ -98,79 +131,93 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        <ScrollView
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          style={styles.heroCarousel}
-        >
-          {trending.map((movie, index) => (
-            <TouchableOpacity
-              key={index}
-              style={styles.heroCard}
-              onPress={() => navigation.navigate('MovieDetail', { movie })}
+      {loading && !hasAnyData ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      ) : (
+        <>
+          <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              style={styles.heroCarousel}
             >
-              <Image source={{ uri: movie.poster_url }} style={styles.heroImage} />
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.8)']}
-                style={styles.heroGradient}
-              >
-                <View style={styles.heroContent}>
-                  <Text style={styles.heroCategory}>En Tendencia</Text>
-                  <Text style={[styles.heroTitle, { marginTop: 4 }]}>{movie.title}</Text>
-                  <TouchableOpacity
-                    style={[styles.heroButton, { marginTop: 8 }]}
-                    onPress={() => navigation.navigate('MovieDetail', { movie })}
+              {trending.map((movie, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.heroCard}
+                  onPress={() => navigation.navigate('MovieDetail', { movie })}
+                >
+                  <Image source={{ uri: movie.poster_url }} style={styles.heroImage} />
+                  <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.8)']}
+                    style={styles.heroGradient}
                   >
-                    <Text style={styles.heroButtonText}>Ver Más</Text>
-                  </TouchableOpacity>
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+                    <View style={styles.heroContent}>
+                      <Text style={styles.heroCategory}>En Tendencia</Text>
+                      <Text style={[styles.heroTitle, { marginTop: 4 }]}>{movie.title}</Text>
+                      <TouchableOpacity
+                        style={[styles.heroButton, { marginTop: 8 }]}
+                        onPress={() => navigation.navigate('MovieDetail', { movie })}
+                      >
+                        <Text style={styles.heroButtonText}>Ver Más</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
 
-        <MovieSection
-          title="Mejor Puntuadas (Críticos)"
-          movies={topCritics}
-          navigation={navigation}
-          showRating
-          ratingType="critic"
-          onPressViewAll={() =>
-            navigation.navigate('MovieList', {
-              type: 'critics',
-              title: 'Mejor Puntuadas (Críticos)',
-            })
-          }
-        />
+            <MovieSection
+              title="Mejor Puntuadas (Críticos)"
+              movies={topCritics}
+              navigation={navigation}
+              showRating
+              ratingType="critic"
+              onPressViewAll={() =>
+                navigation.navigate('MovieList', {
+                  type: 'critics',
+                  title: 'Mejor Puntuadas (Críticos)',
+                })
+              }
+            />
 
-        <MovieSection
-          title="Mejor Puntuadas (Audiencia)"
-          movies={topAudience}
-          navigation={navigation}
-          showRating
-          ratingType="audience"
-          onPressViewAll={() =>
-            navigation.navigate('MovieList', {
-              type: 'audience',
-              title: 'Mejor Puntuadas (Audiencia)',
-            })
-          }
-        />
+            <MovieSection
+              title="Mejor Puntuadas (Audiencia)"
+              movies={topAudience}
+              navigation={navigation}
+              showRating
+              ratingType="audience"
+              onPressViewAll={() =>
+                navigation.navigate('MovieList', {
+                  type: 'audience',
+                  title: 'Mejor Puntuadas (Audiencia)',
+                })
+              }
+            />
 
-        <MovieSection
-          title="Nuevos Estrenos"
-          movies={newReleases}
-          navigation={navigation}
-          onPressViewAll={() =>
-            navigation.navigate('MovieList', {
-              type: 'new',
-              title: 'Nuevos Estrenos',
-            })
-          }
-        />
-      </ScrollView>
+            <MovieSection
+              title="Nuevos Estrenos"
+              movies={newReleases}
+              navigation={navigation}
+              onPressViewAll={() =>
+                navigation.navigate('MovieList', {
+                  type: 'new',
+                  title: 'Nuevos Estrenos',
+                })
+              }
+            />
+          </ScrollView>
+          
+          {loading && hasAnyData && (
+            <View style={styles.loadingIndicator}>
+              <ActivityIndicator size="small" color={Colors.primary} />
+            </View>
+          )}
+        </>
+      )}
     </View>
   );
 }
@@ -355,6 +402,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: Colors.text.primary,
+  },
+  loadingIndicator: {
+    position: 'absolute',
+    top: Platform.OS === 'android' ? 48 : 32,
+    right: 16,
+    zIndex: 10,
   },
 });
 

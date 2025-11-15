@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,9 +19,15 @@ export default function SearchScreen({ navigation }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [selectedGenres, setSelectedGenres] = useState([]);
   const [sortBy, setSortBy] = useState('rating');
   const [mediaType, setMediaType] = useState('movie');
+  
+  const searchTimeoutRef = useRef(null);
+  const searchCounterRef = useRef(0);
+  const allMoviesCacheRef = useRef(null);
+  const cacheKeyRef = useRef(null);
 
   const genres = [
     'Acción',
@@ -112,18 +118,27 @@ export default function SearchScreen({ navigation }) {
       genres = selectedGenres,
       sort = sortBy,
       type = mediaType,
+      immediate = false,
     } = options;
 
     if (!query.trim() && (!genres || genres.length === 0)) {
       setResults([]);
+      setHasSearched(false);
       return;
     }
 
-    setLoading(true);
+    searchCounterRef.current += 1;
+    const currentSearchId = searchCounterRef.current;
+
+    if (results.length === 0) {
+      setLoading(true);
+    }
+
     try {
-      let movies = [];
       const sortParam = sort === 'date' ? 'release_date' : 'rating';
       const genreParam = buildGenreParam(genres);
+
+      let movies = [];
 
       if (query.trim()) {
         const searchParams = {
@@ -139,20 +154,44 @@ export default function SearchScreen({ navigation }) {
           searchParams
         );
 
-        movies = response.data || [];
+        movies = response.data || response || [];
       } else {
-        const params = {
-          sort: sortParam,
-        };
-        if (genreParam) {
-          params.genre = genreParam;
+        if (genreParam && allMoviesCacheRef.current && cacheKeyRef.current === sortParam) {
+          movies = filterBySelectedGenres(allMoviesCacheRef.current, genres);
+          movies = filterByMediaType(movies, type);
+          
+          if (sort === 'date' && movies.length > 0) {
+            movies.sort((a, b) => {
+              const dateA = a.release_date ? new Date(a.release_date) : new Date(0);
+              const dateB = b.release_date ? new Date(b.release_date) : new Date(0);
+              return dateB - dateA;
+            });
+          } else if (sort === 'rating' && movies.length > 0) {
+            movies.sort((a, b) => {
+              const ratingA = a.audience_rating || a.critic_rating || 0;
+              const ratingB = b.audience_rating || b.critic_rating || 0;
+              return ratingB - ratingA;
+            });
+          }
+        } else {
+          const params = {
+            sort: sortParam,
+          };
+          
+          if (genreParam) {
+            params.genre = genreParam;
+          }
+          
+          const response = await moviesService.getMovies(params);
+          movies = response.data || response || [];
+          
+          if (!genreParam && movies.length > 0) {
+            allMoviesCacheRef.current = movies;
+            cacheKeyRef.current = sortParam;
+          }
         }
-        const response = await moviesService.getMovies(params);
-        movies = response.data || [];
       }
 
-      movies = filterBySelectedGenres(movies, genres);
-      movies = filterBySearchQuery(movies, query);
       movies = filterByMediaType(movies, type);
 
       if (sort === 'date' && movies.length > 0) {
@@ -169,12 +208,21 @@ export default function SearchScreen({ navigation }) {
         });
       }
       
-      setResults(movies);
+      if (currentSearchId === searchCounterRef.current) {
+        setResults(movies);
+        setHasSearched(true);
+      }
     } catch (error) {
-      console.error('Error buscando películas:', error);
-      setResults([]);
+      if (currentSearchId === searchCounterRef.current) {
+        if (results.length === 0) {
+          setResults([]);
+        }
+        setHasSearched(true);
+      }
     } finally {
-      setLoading(false);
+      if (currentSearchId === searchCounterRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -183,14 +231,99 @@ export default function SearchScreen({ navigation }) {
       ? selectedGenres.filter((g) => g !== genre)
       : [...selectedGenres, genre];
     setSelectedGenres(newSelectedGenres);
-    handleSearch({ genres: newSelectedGenres });
+    
+    if (allMoviesCacheRef.current && !searchQuery.trim()) {
+      let filteredMovies = filterBySelectedGenres(allMoviesCacheRef.current, newSelectedGenres);
+      filteredMovies = filterByMediaType(filteredMovies, mediaType);
+      
+      if (sortBy === 'date' && filteredMovies.length > 0) {
+        filteredMovies.sort((a, b) => {
+          const dateA = a.release_date ? new Date(a.release_date) : new Date(0);
+          const dateB = b.release_date ? new Date(b.release_date) : new Date(0);
+          return dateB - dateA;
+        });
+      } else if (sortBy === 'rating' && filteredMovies.length > 0) {
+        filteredMovies.sort((a, b) => {
+          const ratingA = a.audience_rating || a.critic_rating || 0;
+          const ratingB = b.audience_rating || b.critic_rating || 0;
+          return ratingB - ratingA;
+        });
+      }
+      
+      setResults(filteredMovies);
+      setHasSearched(true);
+      return;
+    }
+    
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    
+    searchTimeoutRef.current = setTimeout(() => {
+      handleSearch({ genres: newSelectedGenres, immediate: true });
+    }, 200);
   };
+  
+  useEffect(() => {
+    const preloadMovies = async () => {
+      try {
+        const sortParam = sortBy === 'date' ? 'release_date' : 'rating';
+        const response = await moviesService.getMovies({ 
+          sort: sortParam
+        });
+        const movies = response.data || response || [];
+        if (movies.length > 0) {
+          allMoviesCacheRef.current = movies;
+          cacheKeyRef.current = sortParam;
+        }
+      } catch (error) {
+        // Silently handle preload errors
+      }
+    };
+    
+    const currentSort = sortBy === 'date' ? 'release_date' : 'rating';
+    if ((!allMoviesCacheRef.current || cacheKeyRef.current !== currentSort) && 
+        !searchQuery.trim() && selectedGenres.length === 0) {
+      preloadMovies();
+    }
+  }, [sortBy]);
+  
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const clearFilters = () => {
     setSelectedGenres([]);
     setSortBy('rating');
     setSearchQuery('');
     setResults([]);
+    setHasSearched(false);
+    
+    if (allMoviesCacheRef.current) {
+      let movies = [...allMoviesCacheRef.current];
+      movies = filterByMediaType(movies, mediaType);
+      
+      if (sortBy === 'date') {
+        movies.sort((a, b) => {
+          const dateA = a.release_date ? new Date(a.release_date) : new Date(0);
+          const dateB = b.release_date ? new Date(b.release_date) : new Date(0);
+          return dateB - dateA;
+        });
+      } else {
+        movies.sort((a, b) => {
+          const ratingA = a.audience_rating || a.critic_rating || 0;
+          const ratingB = b.audience_rating || b.critic_rating || 0;
+          return ratingB - ratingA;
+        });
+      }
+      
+      setResults(movies);
+      setHasSearched(true);
+    }
   };
 
   const renderMovie = ({ item }) => (
@@ -252,7 +385,23 @@ export default function SearchScreen({ navigation }) {
               ]}
               onPress={() => {
                 setSortBy('rating');
-                handleSearch({ sort: 'rating' });
+                if (allMoviesCacheRef.current && !searchQuery.trim()) {
+                  let sortedMovies = [...allMoviesCacheRef.current];
+                  sortedMovies = filterBySelectedGenres(sortedMovies, selectedGenres);
+                  sortedMovies = filterByMediaType(sortedMovies, mediaType);
+                  sortedMovies.sort((a, b) => {
+                    const ratingA = a.audience_rating || a.critic_rating || 0;
+                    const ratingB = b.audience_rating || b.critic_rating || 0;
+                    return ratingB - ratingA;
+                  });
+                  setResults(sortedMovies);
+                  if (cacheKeyRef.current !== 'rating') {
+                    cacheKeyRef.current = 'rating';
+                    handleSearch({ sort: 'rating', immediate: true }).then(() => {});
+                  }
+                } else {
+                  handleSearch({ sort: 'rating', immediate: true });
+                }
               }}
             >
               <Text
@@ -271,7 +420,23 @@ export default function SearchScreen({ navigation }) {
               ]}
               onPress={() => {
                 setSortBy('date');
-                handleSearch({ sort: 'date' });
+                if (allMoviesCacheRef.current && !searchQuery.trim()) {
+                  let sortedMovies = [...allMoviesCacheRef.current];
+                  sortedMovies = filterBySelectedGenres(sortedMovies, selectedGenres);
+                  sortedMovies = filterByMediaType(sortedMovies, mediaType);
+                  sortedMovies.sort((a, b) => {
+                    const dateA = a.release_date ? new Date(a.release_date) : new Date(0);
+                    const dateB = b.release_date ? new Date(b.release_date) : new Date(0);
+                    return dateB - dateA;
+                  });
+                  setResults(sortedMovies);
+                  if (cacheKeyRef.current !== 'release_date') {
+                    cacheKeyRef.current = 'release_date';
+                    handleSearch({ sort: 'date', immediate: true }).then(() => {});
+                  }
+                } else {
+                  handleSearch({ sort: 'date', immediate: true });
+                }
               }}
             >
               <Text
@@ -304,7 +469,7 @@ export default function SearchScreen({ navigation }) {
                 onPress={() => {
                   const nextType = 'movie';
                   setMediaType(nextType);
-                  handleSearch({ type: nextType });
+                  handleSearch({ type: nextType, immediate: true });
                 }}
               >
                 <Text
@@ -324,7 +489,7 @@ export default function SearchScreen({ navigation }) {
                 onPress={() => {
                   const nextType = 'series';
                   setMediaType(nextType);
-                  handleSearch({ type: nextType });
+                  handleSearch({ type: nextType, immediate: true });
                 }}
               >
                 <Text
@@ -366,12 +531,17 @@ export default function SearchScreen({ navigation }) {
           </View>
         </View>
 
-        {loading ? (
+        {loading && results.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={Colors.primary} />
           </View>
         ) : (
           <View style={styles.resultsContainer}>
+            {loading && results.length > 0 && (
+              <View style={styles.loadingIndicator}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+              </View>
+            )}
             <FlatList
               data={results}
               renderItem={renderMovie}
@@ -380,6 +550,11 @@ export default function SearchScreen({ navigation }) {
               columnWrapperStyle={styles.row}
               scrollEnabled={false}
             />
+            {!loading && hasSearched && results.length === 0 && (selectedGenres.length > 0 || searchQuery.trim()) && (
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No se encontraron películas</Text>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -554,6 +729,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
     fontWeight: '500',
+  },
+  loadingIndicator: {
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: Colors.text.tertiary,
+    fontSize: 16,
   },
 });
 

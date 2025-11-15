@@ -15,10 +15,12 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.cineuru.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+        "backgroundColor": "#121212"
+      },
+      "permissions": []
     },
     "web": {
       "favicon": "./assets/favicon.png"

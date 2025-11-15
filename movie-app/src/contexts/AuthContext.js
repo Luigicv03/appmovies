@@ -29,7 +29,6 @@ export const AuthProvider = ({ children }) => {
         setIsAuthenticated(true);
       }
     } catch (error) {
-      console.error('Error cargando usuario:', error);
     } finally {
       setLoading(false);
     }
@@ -42,7 +41,6 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(true);
       return { success: true };
     } catch (error) {
-      console.error('Error en login:', error);
       return {
         success: false,
         error: error.response?.data?.message || 'Error al iniciar sesión',
@@ -53,14 +51,14 @@ export const AuthProvider = ({ children }) => {
   const register = async (email, username, password) => {
     try {
       const response = await authService.register(email, username, password);
-      if (response.token) {
-        await authService.login(email, password);
+      if (response.token && response.user) {
+        await AsyncStorage.setItem('authToken', response.token);
+        await AsyncStorage.setItem('user', JSON.stringify(response.user));
         setUser(response.user);
         setIsAuthenticated(true);
       }
       return { success: true };
     } catch (error) {
-      console.error('Error en registro:', error);
       return {
         success: false,
         error: error.response?.data?.message || 'Error al registrarse',
@@ -73,17 +71,18 @@ export const AuthProvider = ({ children }) => {
       await authService.logout();
       setUser(null);
       setIsAuthenticated(false);
+      await AsyncStorage.clear();
     } catch (error) {
-      console.error('Error en logout:', error);
+      setUser(null);
+      setIsAuthenticated(false);
+      await AsyncStorage.clear();
     }
   };
 
   const updateUser = async (userData) => {
     setUser((prevUser) => {
       const updatedUser = { ...prevUser, ...userData };
-      AsyncStorage.setItem('user', JSON.stringify(updatedUser)).catch((error) =>
-        console.error('Error actualizando usuario en almacenamiento local:', error)
-      );
+      AsyncStorage.setItem('user', JSON.stringify(updatedUser)).catch(() => {});
       return updatedUser;
     });
   };
